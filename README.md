@@ -55,10 +55,12 @@ This is what my final dashboard looks like.
 
 ![s26](assets/s26.png)
 
-You can view my dashboard https://lookerstudio.google.com/reporting/c44de9b7-7bfc-480a-887e-ad9ea441af6d[here,window="_blank"].
+You can view my dashboard [here](https://lookerstudio.google.com/reporting/c44de9b7-7bfc-480a-887e-ad9ea441af6d)
 
 This dashboard shows the most interesting tweets with the "#dataenginerring" hashtag, the number of tweets and authors,
 graphs, etc.
+
+Unfortunately, it is seen that my NLP analysis to identify the software product did not work well.
 
 ## Reproducibility
 
@@ -805,7 +807,11 @@ You can now feel free to create some visualisations.
 
 Looker tutorials can be found [here](https://cloud.google.com/looker/docs/intro).
 
-You can view my dashboard https://lookerstudio.google.com/reporting/c44de9b7-7bfc-480a-887e-ad9ea441af6d[here,window="_blank"].
+This is what my final dashboard looks like.
+
+![s26](assets/s26.png)
+
+You can view my dashboard [here](https://lookerstudio.google.com/reporting/c44de9b7-7bfc-480a-887e-ad9ea441af6d)
 
 ### Step 13: Stop and delete to avoid costs
 
