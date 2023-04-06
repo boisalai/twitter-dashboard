@@ -1,5 +1,8 @@
 configuration.conf
 make_gcp_block.py
+/data/*
+/prefect/__pycache__/*
+/prefect/__pycache__/
 .DS_Store
 
 # See https://github.com/github/gitignore/blob/main/Terraform.gitignore

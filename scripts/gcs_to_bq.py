@@ -1,8 +1,9 @@
-import configparser
 import pathlib
 import pandas as pd
 import asyncio
-import os
+import tweetnlp
+import re 
+import html
 
 from config import *
 from pathlib import Path
@@ -11,19 +12,13 @@ from prefect import flow, task
 from prefect_gcp.cloud_storage import GcsBucket
 from prefect_gcp import GcpCredentials
 
-# Import Spark NLP
-# from sparknlp.base import *
-# from sparknlp.annotator import *
-# from sparknlp.pretrained import PretrainedPipeline
-# import sparknlp
-
 @task(name="Read Configuration File", log_prints=True)
 def read_config() -> dict:
     config = get_config()
     return config
 
-@task(name="Download data from GCS", retries=3, log_prints=True)
-def extract_from_gcs(config: dict) -> Path:
+@task(name="Get GCS Path", retries=3, log_prints=True)
+def get_gcs_path(config: dict) -> Path:
     """Download data from GCS"""
     bucket_filename = config['bucket_filename']
     gcs_bucket_block_name = config['gcs_bucket_block_name']
@@ -38,58 +33,76 @@ def read_from_gcs(path: Path) -> pd.DataFrame:
     df = pd.read_parquet(path)
     return df
 
-@task(name="Start Spark NLP Session", log_prints=True)
-async def start_sparknlp() -> object:
-    # Start SparkSession with Spark NLP
-    # start() functions has 3 parameters: gpu, apple_silicon, and memory
-    # sparknlp.start(gpu=True) will start the session with GPU support
-    # sparknlp.start(apple_silicon=True) will start the session with macOS M1 & M2 support
-    # sparknlp.start(memory="16G") to change the default driver memory in SparkSession
-    spark = sparknlp.start()
-
-    print("Spark NLP version", sparknlp.version()) # Spark NLP version 4.3.2
-    print("Apache Spark version:", spark.version) # Apache Spark version: 3.3.2
-
-    return spark
-
-@task(name="Download a pre-trained pipeline", log_prints=True)
-async def fetch_pretrained(spark: object) -> object:
-    # Download a pre-trained pipeline.
-    # pipeline = PretrainedPipeline('explain_document_dl', lang='en')
-
-    # Load pretrained pipeline from local disk
-    # pipeline_local = PretrainedPipeline.from_disk('/root/cache_pretrained/explain_document_ml_en_4.0.0_3.0_1656066222624')
-
-    return pipeline
-
-# See https://colab.research.google.com/github/JohnSnowLabs/spark-nlp-workshop/blob/master/tutorials/Certification_Trainings/Public/1.SparkNLP_Basics.ipynb
-@task(name="Transform dataFrame", log_prints=True)
-async def transform(pipeline: object, df: pd.DataFrame) -> pd.DataFrame:
-    """Transforme"""
-
-    # Your testing dataset
-    text = """
-    The Mona Lisa is a 16th century oil painting created by Leonardo.
-    It's held at the Louvre in Paris.
-    """
-
-    # Annotate your testing dataset
-    result = pipeline.annotate(text)
-
-    # What's in the pipeline
-    print(list(result.keys()))
-    # Output: ['entities', 'stem', 'checked', 'lemma', 'document',
-    #         'pos', 'token', 'ner', 'embeddings', 'sentence']
-
-    # Check the results
-    print(result['entities'])
-    # Output: ['Mona Lisa', 'Leonardo', 'Louvre', 'Paris']
+@task(name="Clean Tweets", log_prints=True)
+def clean_tweets(df: pd.DataFrame) -> pd.DataFrame:
+    # Parse the tweets and removes punctuation, stop words, digits, and links.
+    punctuations = """!()-![]{};:+'"\,<>./?@#$%^&*_~Â""" 
+    for i in range(len(df)):
+        tweet = df.loc[i, "content"]
+        tweet = html.unescape(tweet) # Removes leftover HTML elements, such as &amp;.
+        tweet = re.sub(r"@\w+", ' ', tweet) # Completely removes @'s, as other peoples' usernames mean nothing.
+        tweet = re.sub(r'http\S+', ' ', tweet) # Removes links, as links provide no data in tweet analysis in themselves.
+        tweet = re.sub(r"\d+\S+", ' ', tweet) # Removes numbers, as well as cases like the "th" in "14th".
+        # tweet = ''.join([punc for punc in tweet if not punc in punctuations]) # Removes the punctuation defined above.
+        # tweet = tweet.lower() # Turning the tweets lowercase real quick for later use.
+        df.loc[i, "tweet"] = tweet
 
     return df
 
-@task(name="Write DataFrame to BiqQuery", log_prints=True)
+@task(name="Transform with tweetnlp", log_prints=True)
+async def transform(df: pd.DataFrame) -> pd.DataFrame:
+    """Transform with tweetnlp"""
+
+    # Topic Classification.
+    # The aim of this task is, given a tweet to assign topics related to its content. 
+    classification_model = tweetnlp.load_model('topic_classification', multi_label=False)  
+
+    # Named Entity Recognition.
+    # This module consists of a named-entity recognition (NER) model specifically trained for tweets.
+    ner_model = tweetnlp.load_model('ner')
+
+    for i in range(len(df)):
+        if i % 1000 == 0:
+            print(f"i={i}")
+
+        text = df.loc[i, "tweet"]
+
+        # Topic Classification.
+        dict = classification_model.topic(text, return_probability=True)
+        topic = dict['label']
+        df.loc[i, "topic"] = topic
+
+        try:
+            science_technology_probability = dict['probability']['science_&_technology']
+        except KeyError:
+            science_technology_probability = 0
+        df.loc[i, "science_technology_probability"] = science_technology_probability
+
+        # Named Entity Recognition.
+        list = ner_model.ner(text, return_probability=True)
+        sorted_list = sorted(list, key=lambda x: x['probability'], reverse=True)
+
+        # Get product with highest probability.
+        product = "None"
+        for item in sorted_list:
+            if item['type'] == 'product':
+                product = item['entity'].strip()
+                break
+        df.loc[i, "product"] = product
+
+        # Get corporation with highest probability.
+        corporation = "None"
+        for item in sorted_list:
+            if item['type'] == 'corporation':
+                corporation = item['entity'].strip()
+                break
+        df.loc[i, "corporation"] = corporation
+
+    return df
+
+@task(name="Write DataFrame to BiqQuery table", log_prints=True)
 def write_bq(config: dict, df: pd.DataFrame) -> None:
-    """Write DataFrame to BiqQuery"""
+    """Write DataFrame to BiqQuery table"""
     gcp_credentials = config['gcp_credentials']
     project_id = config['project_id']
     bq_dataset = config['bq_dataset']
@@ -97,22 +110,22 @@ def write_bq(config: dict, df: pd.DataFrame) -> None:
 
     gcp_credentials_block = GcpCredentials.load(gcp_credentials)
 
+    # See https://pandas.pydata.org/docs/reference/api/pandas.DataFrame.to_gbq.html
     df.to_gbq(
         destination_table = bq_dataset + "." + bq_table,
         project_id = project_id,
         credentials = gcp_credentials_block.get_credentials_from_service_account(),
         chunksize = 500_000,
-        if_exists = "append",
+        if_exists = 'replace'
     )
 
 @flow(name="gcs-to-bq", log_prints=True)
 def gcs_to_bq() -> None:
     """Main ETL flow to load data into Big Query"""
     config = read_config()
-    path = extract_from_gcs(config)
+    path = get_gcs_path(config)
     df = read_from_gcs(path)
-    # spark = start_sparknlp()
-    # pipeline = fetch_pretrained(spark)
-    # df_transformed = transform(pipeline, df)
+    df_clean = clean_tweets(df)
+    df_transformed = transform(df)
     write_bq(config, df)
 
