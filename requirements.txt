@@ -11,4 +11,3 @@ sqlalchemy==1.4.46
 pytest==7.1.2
 gcsfs
 jupyter
-tweetnlp

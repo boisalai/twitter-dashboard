@@ -33,7 +33,7 @@ The whole process is orchestrated by the workflow orchestration engine [Prefect]
 
 A pipeline gets the data, cleans it, saves first it as a parquet file and than moves to a Data Lake. Another pipeline
 gets data from the Data Lake, The second pipeline does some transformations with
-[tweetnlp](https://tweetnlp.org/get-started/), and creates a Data Warehouse.
+[spacy](https://spacy.io/), and creates a Data Warehouse.
 
 Since my pipeline is a relative short process that handle a small volume of data (about 25,000 tweets), I use the ETL
 approach, which stands for Extract, Transform and Load.
@@ -53,11 +53,9 @@ This diagram presents the high level architecture of the project.
 
 This is what my final dashboard looks like.
 
-<div class="warning">
+![s26](assets/s26.png)
 
-Ajouter une image du dashboard. ???
-
-</div>
+You can view my dashboard https://lookerstudio.google.com/reporting/c44de9b7-7bfc-480a-887e-ad9ea441af6d[here,window="_blank"].
 
 This dashboard shows the most interesting tweets with the "#dataenginerring" hashtag, the number of tweets and authors,
 graphs, etc.
@@ -134,7 +132,6 @@ issues are encountered.
 This repository (<https://github.com/boisalai/twitter-dashboard>) contains only two folders:
 
 - `terraform`: this folder is related to Terraform.
-
 - `scripts`: this folder contains scripts to create Block and run pipelines for Prefect.
 
 ### Step 1: Create a new project in Google Cloud Platform
@@ -548,7 +545,9 @@ conda activate myenv
 conda install pip
 conda update -n base -c defaults conda
 pip install -r ~/twitter-dashboard/requirements.txt
-pip install git+https://github.com/JustAnotherArchivist/snscrape.git
+pip install -U pip setuptools wheel
+pip install -U spacy
+python -m spacy download en_core_web_sm
 ```
 
 After that, you have a conda environment `myenv` with all required libraries installed.
@@ -752,9 +751,9 @@ You should see your dataset `twitter-posts.parquet`.
 #### From Data Lake to Data Warehouse
 
 The second pipeline reads that dataset from the Cloud Storage bucket, does some transformations with
-[tweetnlp](https://tweetnlp.org/get-started/).
+[spacy](https://spacy.io/).
 
-Specifically, it cleans the tweets and determines the topic with the highest probability, product, and corporation.
+Specifically, it cleans tweets and determines the main technology product the tweets are talking about with NLP analysis.
 
 Finally, it saves the tweet data to a Data Warehouse BigQuery.
 
@@ -767,14 +766,11 @@ prefect deployment run "gcs-to-bq/twitter"
 prefect agent start -q "default"
 ```
 
-The last step takes time to execute (about 2 hours!). It would probably have been necessary to reserve a virtual machine
-with GPUs to speed up the calculations.
+The last step takes time to execute (about 5 minutes).
 
 When finished see should see this on Google Cloud Console, BigQuery section.
 
-
-Insérer une image. ???
-
+![s25](assets/s25.png)
 
 Great! Tweet data is ready for visualization.
 
@@ -809,6 +805,8 @@ You can now feel free to create some visualisations.
 
 Looker tutorials can be found [here](https://cloud.google.com/looker/docs/intro).
 
+You can view my dashboard https://lookerstudio.google.com/reporting/c44de9b7-7bfc-480a-887e-ad9ea441af6d[here,window="_blank"].
+
 ### Step 13: Stop and delete to avoid costs
 
 To avoid incurring unnecessary charges to your GCP account, destroy all remote objects managed by a our Terraform
@@ -822,129 +820,3 @@ terraform destroy
 
 You can also manually delete your Virtual Environment, Bucket and BigQuery ressource and perhaps your Google Cloud
 project.
-
-## Additional material
-
-During the development of my project, I searched for using Spark in Prefect. Considering the small volume of data
-(around 25,000 tweets) I ended up not using Spark for my project.
-
-Despite this, here I present how to install and use Spark. It might be useful to someone.
-
-Here we’ll show you how to install et use Spark 3.3.2 for Linux on Prefect.
-
-### Install Java
-
-Download OpenJDK 11 or Oracle JDK 11 (It’s important that the version is 11 - spark requires 8 or 11)
-
-We will use [OpenJDK](https://jdk.java.net/archive/).
-
-On your VM instance, download this file in `~/spark` directory, unpack it and and remove the archive.
-
-``` bash
-cd
-mkdir spark
-cd spark
-wget https://download.java.net/java/GA/jdk11/9/GPL/openjdk-11.0.2_linux-x64_bin.tar.gz
-tar zxvf openjdk-11.0.2_linux-x64_bin.tar.gz
-rm openjdk-11.0.2_linux-x64_bin.tar.gz
-```
-
-On your VM instance, define `JAVA_HOME`, add it to `PATH` and check that it works with the following commands.
-
-``` bash
-echo 'export JAVA_HOME="$HOME/spark/jdk-11.0.2"' >> ~/.bashrc
-echo 'export PATH="$JAVA_HOME/bin:$PATH"' >> ~/.bashrc
-source ~/.bashrc
-java --version
-```
-
-You should see this output.
-
-``` txt3
-openjdk 11.0.2 2019-01-15
-OpenJDK Runtime Environment 18.9 (build 11.0.2+9)
-OpenJDK 64-Bit Server VM 18.9 (build 11.0.2+9, mixed mode)
-```
-
-## Install Spark
-
-On your VM instance, download Spark 3.3.2, unpack it and remove the archive.
-
-``` bash
-cd ~/spark
-wget https://dlcdn.apache.org/spark/spark-3.3.2/spark-3.3.2-bin-hadoop3.tgz
-tar xzfv spark-3.3.2-bin-hadoop3.tgz
-rm spark-3.3.2-bin-hadoop3.tgz
-```
-
-Add it to PATH and start Spark shell with the following commands.
-
-``` bash
-echo 'export SPARK_HOME="$HOME/spark/spark-3.3.2-bin-hadoop3"' >> ~/.bashrc
-echo 'export PATH="$SPARK_HOME/bin:$PATH"' >> ~/.bashrc
-source ~/.bashrc
-spark-shell
-```
-
-You shoud see this output.
-
-![s06](assets/s06.png)
-
-Congratulation! We have successfully installed Apache Spark on Linux!
-
-To close Spark shell, you press `CTLR+D` or simply type in `:quit` or `:q`.
-
-### Install PySpark
-
-To run PySpark, we first need to add it to `PYTHONPATH`.
-
-On your VM instance,run the following commands.
-
-``` bash
-echo 'export PYTHONPATH="$SPARK_HOME/python/:$PYTHONPATH"' >> ~/.bashrc
-echo 'export PYTHONPATH="$SPARK_HOME/python/lib/py4j-0.10.9.5-src.zip:$PYTHONPATH"' >> ~/.bashrc
-source ~/.bashrc
-```
-
-### Prefect pipeline
-
-Here is a skeleton of a script for Prefect using Spark to process data
-
-``` python
-from prefect import task, Flow, resource_manager
-
-from pyspark import SparkConf
-from pyspark.sql import SparkSession
-
-@resource_manager
-class SparkCluster:
-    def __init__(self, conf: SparkConf = SparkConf()):
-        self.conf = conf
-
-    def setup(self) -> SparkSession:
-        return SparkSession.builder.config(conf=self.conf).getOrCreate()
-
-    def cleanup(self, spark: SparkSession):
-        spark.stop()
-
-@task
-def get_data(spark: SparkSession):
-    return spark.createDataFrame([('look',), ('spark',), ('tutorial',), ('spark',), ('look', ), ('python', )], ['word'])
-
-@task(log_stdout=True)
-def analyze(df):
-    word_count = df.groupBy('word').count()
-    word_count.show()
-
-
-with Flow("spark_flow") as flow:
-    conf = SparkConf().setMaster('local[*]')
-    with SparkCluster(conf) as spark:
-        df = get_data(spark)
-        analyze(df)
-
-if __name__ == '__main__':
-    flow.run()
-```
-
-

@@ -1,9 +1,13 @@
 import pathlib
 import pandas as pd
 import asyncio
-import tweetnlp
 import re 
 import html
+
+import spacy
+from spacy import displacy
+from collections import Counter
+import en_core_web_sm
 
 from config import *
 from pathlib import Path
@@ -43,60 +47,31 @@ def clean_tweets(df: pd.DataFrame) -> pd.DataFrame:
         tweet = re.sub(r"@\w+", ' ', tweet) # Completely removes @'s, as other peoples' usernames mean nothing.
         tweet = re.sub(r'http\S+', ' ', tweet) # Removes links, as links provide no data in tweet analysis in themselves.
         tweet = re.sub(r"\d+\S+", ' ', tweet) # Removes numbers, as well as cases like the "th" in "14th".
-        # tweet = ''.join([punc for punc in tweet if not punc in punctuations]) # Removes the punctuation defined above.
-        # tweet = tweet.lower() # Turning the tweets lowercase real quick for later use.
+        tweet = ''.join([punc for punc in tweet if not punc in punctuations]) # Removes the punctuation defined above.
+        tweet = tweet.lower() # Turning the tweets lowercase real quick for later use.
         df.loc[i, "tweet"] = tweet
 
     return df
 
-@task(name="Transform with tweetnlp", log_prints=True)
+@task(name="Transform with spacy", log_prints=True)
 async def transform(df: pd.DataFrame) -> pd.DataFrame:
-    """Transform with tweetnlp"""
-
-    # Topic Classification.
-    # The aim of this task is, given a tweet to assign topics related to its content. 
-    classification_model = tweetnlp.load_model('topic_classification', multi_label=False)  
-
-    # Named Entity Recognition.
-    # This module consists of a named-entity recognition (NER) model specifically trained for tweets.
-    ner_model = tweetnlp.load_model('ner')
+    """Transform with spacy"""
+    # nlp = en_core_web_sm.load()
+    nlp = spacy.load('en_core_web_sm')
 
     for i in range(len(df)):
         if i % 1000 == 0:
             print(f"i={i}")
 
         text = df.loc[i, "tweet"]
+        doc = nlp(text)
 
-        # Topic Classification.
-        dict = classification_model.topic(text, return_probability=True)
-        topic = dict['label']
-        df.loc[i, "topic"] = topic
+        if len(doc.ents) > 0:
+            product = str(doc.ents[0])
+        else:
+            product = None
 
-        try:
-            science_technology_probability = dict['probability']['science_&_technology']
-        except KeyError:
-            science_technology_probability = 0
-        df.loc[i, "science_technology_probability"] = science_technology_probability
-
-        # Named Entity Recognition.
-        list = ner_model.ner(text, return_probability=True)
-        sorted_list = sorted(list, key=lambda x: x['probability'], reverse=True)
-
-        # Get product with highest probability.
-        product = "None"
-        for item in sorted_list:
-            if item['type'] == 'product':
-                product = item['entity'].strip()
-                break
         df.loc[i, "product"] = product
-
-        # Get corporation with highest probability.
-        corporation = "None"
-        for item in sorted_list:
-            if item['type'] == 'corporation':
-                corporation = item['entity'].strip()
-                break
-        df.loc[i, "corporation"] = corporation
 
     return df
 
@@ -126,6 +101,6 @@ def gcs_to_bq() -> None:
     path = get_gcs_path(config)
     df = read_from_gcs(path)
     df_clean = clean_tweets(df)
-    df_transformed = transform(df)
-    write_bq(config, df)
+    df_transformed = transform(df_clean)
+    write_bq(config, df_transformed)
 
